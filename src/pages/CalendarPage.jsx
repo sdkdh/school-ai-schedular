@@ -21,14 +21,13 @@ export default function CalendarPage() {
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // 달력에서 선택한 날짜(= 개인 일정 조회 기준 + 월 주요 일정 기준)
   const [date, setDate] = useState(new Date());
 
-  // 개인 일정(선택한 날짜의 것만)
+  // 개인 일정(선택한 날짜)
   const [personalSchedules, setPersonalSchedules] = useState([]);
   const [newPersonalTitle, setNewPersonalTitle] = useState("");
 
-  // 주요 일정(선택한 날짜가 속한 "월" 전체)
+  // 주요 일정(선택한 날짜가 속한 월 전체)
   const [majorSchedules, setMajorSchedules] = useState([]);
   const [newMajorTitle, setNewMajorTitle] = useState("");
 
@@ -36,20 +35,26 @@ export default function CalendarPage() {
   const [statusMsg, setStatusMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  // 수정 상태 (개인/주요 각각)
+  // 수정 상태(개인/주요)
   const [editingPersonalIndex, setEditingPersonalIndex] = useState(null);
   const [editingPersonalValue, setEditingPersonalValue] = useState("");
 
   const [editingMajorId, setEditingMajorId] = useState(null);
   const [editingMajorValue, setEditingMajorValue] = useState("");
 
-  // YYYY-MM-DD
-  const dateKey = date.toLocaleDateString("sv-SE");
-  // YYYY-MM
-  const monthKey = dateKey.slice(0, 7);
+  // ✅ AI 요약 결과
+  const [aiText, setAiText] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const dateKey = date.toLocaleDateString("sv-SE"); // YYYY-MM-DD
+  const monthKey = dateKey.slice(0, 7); // YYYY-MM
+
+  // ✅ Render 서버 주소(너 URL로 바꿔!)
+  const RENDER_BASE_URL = "https://YOUR-RENDER-SERVICE.onrender.com";
+  const AI_URL = `${RENDER_BASE_URL}/aiSummary`;
 
   // -------------------
-  // 로그인 상태 / 관리자 판정
+  // 로그인 / 관리자
   // -------------------
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -60,9 +65,7 @@ export default function CalendarPage() {
   }, []);
 
   // -------------------
-  // 개인 일정 로드(선택 날짜)
-  // users/{uid}/personal/{YYYY-MM-DD}
-  // { items: [{ title }] }
+  // 개인 일정 로드
   // -------------------
   const loadPersonal = async () => {
     if (!user) return;
@@ -77,9 +80,7 @@ export default function CalendarPage() {
   };
 
   // -------------------
-  // 주요 일정 로드(선택한 날짜가 속한 월 전체)
-  // major_schedules 컬렉션
-  // 문서: { title, date, month, createdAt }
+  // 주요 일정 로드(월)
   // -------------------
   const loadMajorForMonth = async () => {
     try {
@@ -94,16 +95,15 @@ export default function CalendarPage() {
       setMajorSchedules(items);
     } catch (e) {
       console.error("loadMajorForMonth error:", e);
-      setErrorMsg(
-        `주요 일정 불러오기 실패: ${e?.message || e}\n(인덱스/권한 문제일 수 있음)`
-      );
+      setErrorMsg(`주요 일정 불러오기 실패: ${e?.message || e}`);
     }
   };
 
-  // 날짜(선택) 바뀔 때마다 로드
   useEffect(() => {
     setStatusMsg("");
     setErrorMsg("");
+    setAiText("");
+
     setEditingPersonalIndex(null);
     setEditingPersonalValue("");
     setEditingMajorId(null);
@@ -115,12 +115,11 @@ export default function CalendarPage() {
   }, [user, date]);
 
   // -------------------
-  // 개인 일정 추가
+  // 개인 일정 추가/삭제/수정
   // -------------------
   const addPersonal = async () => {
     setStatusMsg("");
     setErrorMsg("");
-
     if (!user) return;
     if (!newPersonalTitle.trim()) return;
 
@@ -129,10 +128,7 @@ export default function CalendarPage() {
       const snap = await getDoc(ref);
       const existing = snap.exists() ? snap.data().items : [];
 
-      await setDoc(ref, {
-        items: [...existing, { title: newPersonalTitle }],
-      });
-
+      await setDoc(ref, { items: [...existing, { title: newPersonalTitle }] });
       setNewPersonalTitle("");
       setStatusMsg("✅ 개인 일정 추가 완료");
       loadPersonal();
@@ -142,20 +138,15 @@ export default function CalendarPage() {
     }
   };
 
-  // -------------------
-  // 개인 일정 삭제(본인)
-  // -------------------
   const deletePersonal = async (index) => {
     setStatusMsg("");
     setErrorMsg("");
-
     if (!user) return;
 
     try {
       const ref = doc(db, "users", user.uid, "personal", dateKey);
       const next = [...personalSchedules];
       next.splice(index, 1);
-
       await setDoc(ref, { items: next });
       setStatusMsg("✅ 개인 일정 삭제 완료");
       loadPersonal();
@@ -165,21 +156,14 @@ export default function CalendarPage() {
     }
   };
 
-  // -------------------
-  // 개인 일정 수정 시작
-  // -------------------
   const startEditPersonal = (index) => {
     setEditingPersonalIndex(index);
     setEditingPersonalValue(personalSchedules[index]?.title ?? "");
   };
 
-  // -------------------
-  // 개인 일정 수정 저장
-  // -------------------
   const saveEditPersonal = async () => {
     setStatusMsg("");
     setErrorMsg("");
-
     if (!user) return;
     if (editingPersonalIndex === null) return;
     if (!editingPersonalValue.trim()) return;
@@ -188,7 +172,6 @@ export default function CalendarPage() {
       const ref = doc(db, "users", user.uid, "personal", dateKey);
       const next = [...personalSchedules];
       next[editingPersonalIndex] = { title: editingPersonalValue };
-
       await setDoc(ref, { items: next });
 
       setEditingPersonalIndex(null);
@@ -202,12 +185,11 @@ export default function CalendarPage() {
   };
 
   // -------------------
-  // 주요 일정 추가(관리자만)
+  // 주요 일정 추가/삭제/수정(관리자만)
   // -------------------
   const addMajor = async () => {
     setStatusMsg("");
     setErrorMsg("");
-
     if (!isAdmin) {
       setErrorMsg("관리자만 주요 일정을 추가할 수 있어.");
       return;
@@ -215,38 +197,29 @@ export default function CalendarPage() {
     if (!newMajorTitle.trim()) return;
 
     try {
-      const docRef = await addDoc(collection(db, "major_schedules"), {
+      await addDoc(collection(db, "major_schedules"), {
         title: newMajorTitle,
-        date: dateKey, // 선택한 날짜에 등록
+        date: dateKey,
         month: monthKey,
         createdAt: Date.now(),
       });
-
-      console.log("major added id:", docRef.id);
 
       setNewMajorTitle("");
       setStatusMsg("✅ 주요 일정 추가 완료");
       loadMajorForMonth();
     } catch (e) {
       console.error("addMajor error:", e);
-      setErrorMsg(
-        `주요 일정 추가 실패: ${e?.message || e}\n(대부분 Firestore Rules에서 major_schedules 쓰기 권한이 막혀서 그래)`
-      );
+      setErrorMsg(`주요 일정 추가 실패: ${e?.message || e}`);
     }
   };
 
-  // -------------------
-  // 주요 일정 삭제(관리자만)
-  // -------------------
   const deleteMajor = async (id) => {
     setStatusMsg("");
     setErrorMsg("");
-
     if (!isAdmin) {
       setErrorMsg("관리자만 주요 일정을 삭제할 수 있어.");
       return;
     }
-
     try {
       await deleteDoc(doc(db, "major_schedules", id));
       setStatusMsg("✅ 주요 일정 삭제 완료");
@@ -257,22 +230,15 @@ export default function CalendarPage() {
     }
   };
 
-  // -------------------
-  // 주요 일정 수정 시작(관리자만)
-  // -------------------
   const startEditMajor = (m) => {
     if (!isAdmin) return;
     setEditingMajorId(m.id);
     setEditingMajorValue(m.title ?? "");
   };
 
-  // -------------------
-  // 주요 일정 수정 저장(관리자만)
-  // -------------------
   const saveEditMajor = async () => {
     setStatusMsg("");
     setErrorMsg("");
-
     if (!isAdmin) {
       setErrorMsg("관리자만 주요 일정을 수정할 수 있어.");
       return;
@@ -295,14 +261,47 @@ export default function CalendarPage() {
     }
   };
 
-  const smallBtn = {
-    fontSize: "0.75rem",
-    padding: "2px 6px",
-    marginLeft: 6,
+  // -------------------
+  // ✅ AI 요약 버튼
+  // -------------------
+  const runAiSummary = async () => {
+    setStatusMsg("");
+    setErrorMsg("");
+    setAiText("");
+
+    try {
+      setAiLoading(true);
+
+      const payload = {
+        monthKey,
+        selectedDate: dateKey,
+        majors: majorSchedules.map((m) => ({ date: m.date, title: m.title })),
+        personals: personalSchedules.map((p) => ({ title: p.title })),
+      };
+
+      const r = await fetch(AI_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || "AI 요청 실패");
+
+      setAiText(data.text || "(AI 응답이 비어있음)");
+      setStatusMsg("✅ AI 요약 생성 완료");
+    } catch (e) {
+      console.error("runAiSummary error:", e);
+      setErrorMsg(`AI 요약 실패: ${e?.message || e}`);
+    } finally {
+      setAiLoading(false);
+    }
   };
 
+  const smallBtn = { fontSize: "0.75rem", padding: "2px 6px", marginLeft: 6 };
+
   return (
-    <div style={{ padding: 20, maxWidth: 520, margin: "0 auto" }}>
+    <div style={{ padding: 20, maxWidth: 560, margin: "0 auto" }}>
       <h2>학교 일정 관리</h2>
 
       {user ? (
@@ -313,7 +312,6 @@ export default function CalendarPage() {
         <div style={{ marginBottom: 10 }}>로그인 확인 중...</div>
       )}
 
-      {/* 상태/에러 표시 */}
       {statusMsg && (
         <div style={{ marginBottom: 10, padding: 8, border: "1px solid #cfc" }}>
           {statusMsg}
@@ -325,9 +323,39 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {/* ✅ 주요 일정: 달(월) 단위로 항상 표시 */}
-      <h3>{monthKey} 주요 일정</h3>
+      {/* ✅ AI 요약 */}
+      <div
+        style={{
+          border: "1px solid #ddd",
+          borderRadius: 8,
+          padding: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>
+          AI 이번 달 요약/우선순위 추천
+        </div>
+        <button onClick={runAiSummary} disabled={aiLoading}>
+          {aiLoading ? "생성 중..." : "AI 요약 생성하기"}
+        </button>
 
+        {aiText && (
+          <pre
+            style={{
+              marginTop: 10,
+              whiteSpace: "pre-wrap",
+              background: "#f7f7f7",
+              padding: 10,
+              borderRadius: 8,
+            }}
+          >
+            {aiText}
+          </pre>
+        )}
+      </div>
+
+      {/* ✅ 월 주요 일정 */}
+      <h3>{monthKey} 주요 일정</h3>
       {majorSchedules.length === 0 ? (
         <p>없음</p>
       ) : (
@@ -374,7 +402,6 @@ export default function CalendarPage() {
         </ul>
       )}
 
-      {/* 관리자만 주요 일정 추가 */}
       {isAdmin && (
         <div style={{ marginBottom: 16 }}>
           <input
@@ -390,9 +417,8 @@ export default function CalendarPage() {
 
       <Calendar value={date} onChange={setDate} />
 
-      {/* ✅ 개인 일정: 날짜 클릭했을 때만 그 날짜 일정 표시 */}
+      {/* ✅ 선택 날짜 개인 일정 */}
       <h3 style={{ marginTop: 16 }}>선택 날짜 개인 일정: {dateKey}</h3>
-
       {personalSchedules.length === 0 ? (
         <p>없음</p>
       ) : (
